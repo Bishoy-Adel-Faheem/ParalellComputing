@@ -1,0 +1,12 @@
+# Ignore Visual Studio folder
+.vs/
+*.user
+*.suo
+*.sdf
+*.db
+*.VC.db
+*.opendb
+
+# Ignore build output
+bin/
+obj/

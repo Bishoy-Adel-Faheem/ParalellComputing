@@ -1,0 +1,8 @@
+﻿  main.cpp
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(141,1): warning C4010: single-line comment contains line-continuation character
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(197,21): warning C4018: '>': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(545,62): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(553,31): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(870,31): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(910,36): warning C4018: '>=': signed/unsigned mismatch
+  ParallelComputingProject.vcxproj -> D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\Debug\ParallelComputingProject.exe
