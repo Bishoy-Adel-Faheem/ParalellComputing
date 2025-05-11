@@ -1,12 +1,10 @@
 ﻿  main.cpp
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(143,1): warning C4010: single-line comment contains line-continuation character
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(199,21): warning C4018: '>': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(441,41): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(441,78): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(461,41): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(461,78): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(594,62): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(602,31): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(900,31): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(940,36): warning C4018: '>=': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(140,1): warning C4010: single-line comment contains line-continuation character
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(196,21): warning C4018: '>': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(472,37): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(472,74): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(589,62): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(596,31): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(969,25): warning C4018: '<': signed/unsigned mismatch
+D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(1001,27): warning C4018: '<': signed/unsigned mismatch
   ParallelComputingProject.vcxproj -> D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\Debug\ParallelComputingProject.exe

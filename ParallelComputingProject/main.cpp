@@ -16,13 +16,10 @@
 using namespace std;
 
 // Platform-specific includes for directory operations
-#ifdef _WIN32
+
 #include <direct.h>  // For _mkdir on Windows
 #define MKDIR(dir) _mkdir(dir)
-#else
-#include <sys/stat.h>  // For mkdir on Unix/Linux
-#define MKDIR(dir) mkdir(dir, 0777)
-#endif
+
 
 //=============================================================================
 // IO Handler
@@ -229,11 +226,17 @@ private:
 // Algorithm 1: Quick Search
 //=============================================================================
 
+
 class QuickSearch {
 public:
-    static bool parallelSearch(const vector<int>& data, int search_value, int world_size) {
+    static int parallelSearch(const vector<int>& data, int search_value, int world_size) {
         int world_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+        // Logging
+        if (world_rank == 0) {
+            cout << endl << "Distributing data across processes..." << endl;
+        }
 
         int data_size = data.size();
 
@@ -247,6 +250,9 @@ public:
         // Each process will have at least chunk_size elements
         // The first 'remainder' processes get one extra element
         int local_size = (world_rank < remainder) ? chunk_size + 1 : chunk_size;
+
+        // Calculate local offset for this process
+        int local_offset = world_rank * chunk_size + min(world_rank, remainder);
 
         // Allocate memory for local chunk
         vector<int> local_data(local_size);
@@ -270,21 +276,35 @@ public:
             MPI_Recv(local_data.data(), local_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         }
 
-        // Each process searches its chunk
-        bool local_found = searchInChunk(local_data, search_value);
+        // Each process searches its chunk and returns local index if found
+        int local_result = searchInChunk(local_data, search_value);
+
+        // Convert local index to global index if found
+        int global_result = -1;
+        if (local_result != -1) {
+            global_result = local_offset + local_result;
+            // Print which process found the value and at what index
+            cout << "[Process " << world_rank << "] Found value " << search_value << " at index " << global_result << endl;
+
+        }
 
         // Gather results
-        int global_found = 0;
-        MPI_Reduce(&local_found, &global_found, 1, MPI_INT, MPI_LOR, 0, MPI_COMM_WORLD);
+        int final_result = -1;
+        MPI_Allreduce(&global_result, &final_result, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-        return global_found != 0;
+        return final_result;
     }
 
 private:
-    static bool searchInChunk(const vector<int>& chunk, int search_value) {
-        return find(chunk.begin(), chunk.end(), search_value) != chunk.end();
+    static int searchInChunk(const vector<int>& chunk, int search_value) {
+        auto it = find(chunk.begin(), chunk.end(), search_value);
+        if (it != chunk.end()) {
+            return distance(chunk.begin(), it);
+        }
+        return -1;  // Not found
     }
 };
+
 
 //=============================================================================
 // Algorithm 2: Prime Number Finding
@@ -296,6 +316,11 @@ public:
         int world_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
+        // Logging header
+        if (world_rank == 0) {
+
+            cout << endl << "Reading data and distributing to processes..." << endl;
+        }
         // First broadcast the data size
         int data_size = data.size();
         MPI_Bcast(&data_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -330,6 +355,11 @@ public:
             MPI_Recv(local_data.data(), local_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         }
 
+
+        // Logging chunk assignment
+        cout << endl << "[Process " << world_rank << "] Received " << local_size << " elements." << endl;
+
+
         // Find primes in local data
         vector<int> local_primes;
         for (int num : local_data) {
@@ -337,6 +367,9 @@ public:
                 local_primes.push_back(num);
             }
         }
+
+        // Logging local prime results
+        cout << endl << "[Process " << world_rank << "] Found " << local_primes.size() << " prime numbers." << endl;
 
         // Gather results
         int local_count = local_primes.size();
@@ -365,6 +398,9 @@ public:
             sort(global_primes.begin(), global_primes.end());
             auto last = unique(global_primes.begin(), global_primes.end());
             global_primes.erase(last, global_primes.end());
+
+            // Final logging
+            cout << "[Master] Total unique primes found: " << global_primes.size() << endl;
 
             // Visualize results
             IOHandler::visualizeData(global_primes, "Prime Numbers in Input");
@@ -397,13 +433,10 @@ private:
 // Algorithm 3: Bitonic Sort
 //=============================================================================
 
-//=============================================================================
-// Algorithm 3: Bitonic Sort
-//=============================================================================
 
 class BitonicSort {
 private:
-    // Find the next power of 2 that is greater than or equal to n
+    // Function to find the next power of two greater than or equal to n
     static int nextPowerOfTwo(int n) {
         int power = 1;
         while (power < n) {
@@ -412,88 +445,66 @@ private:
         return power;
     }
 
-    // Helper function to perform ascending swap
+    // Swap elements in ascending order
     static void ascendingSwap(int index1, int index2, vector<int>& data) {
         if (data[index2] < data[index1]) {
             swap(data[index1], data[index2]);
         }
     }
 
-    // Helper function to perform descending swap
+    // Swap elements in descending order
     static void descendingSwap(int index1, int index2, vector<int>& data) {
         if (data[index1] < data[index2]) {
             swap(data[index1], data[index2]);
         }
     }
 
-    // Form a increasing or decreasing array from a bitonic sequence
+    // Perform Bitonic Sort on a bitonic sequence
     static void bitonicSortFromBitonicSequence(int startIndex, int lastIndex, int dir, vector<int>& data) {
         if (startIndex >= lastIndex) return; // Handle edge case
 
-        if (dir == 1) { // ascending sort
-            int counter = 0;
-            int noOfElements = lastIndex - startIndex + 1;
-            for (int j = noOfElements / 2; j > 0; j = j / 2) {
-                counter = 0;
-                for (int i = startIndex; i + j <= lastIndex; i++) {
-                    if (counter < j) {
+        int counter = 0;
+        int noOfElements = lastIndex - startIndex + 1;
+        for (int j = noOfElements / 2; j > 0; j = j / 2) {
+            counter = 0;
+            for (int i = startIndex; i + j <= lastIndex; i++) {
+                if (counter < j) {
                         // Ensure we don't access out of bounds
-                        if (i >= 0 && i < data.size() && i + j >= 0 && i + j < data.size()) {
+                    if (i >= 0 && i < data.size() && i + j >= 0 && i + j < data.size()) {
+                        if (dir == 1)
                             ascendingSwap(i, i + j, data);
-                        }
-                        counter++;
-                    }
-                    else {
-                        counter = 0;
-                        i = i + j - 1;
-                    }
-                }
-            }
-        }
-        else { // descending sort
-            int counter = 0;
-            int noOfElements = lastIndex - startIndex + 1;
-            for (int j = noOfElements / 2; j > 0; j = j / 2) {
-                counter = 0;
-                for (int i = startIndex; i <= (lastIndex - j); i++) {
-                    if (counter < j) {
-                        // Ensure we don't access out of bounds
-                        if (i >= 0 && i < data.size() && i + j >= 0 && i + j < data.size()) {
+                        else
                             descendingSwap(i, i + j, data);
-                        }
-                        counter++;
                     }
-                    else {
-                        counter = 0;
-                        i = i + j - 1;
-                    }
+                    counter++;
+                }
+                else {
+                    counter = 0;
+                    i = i + j - 1;
                 }
             }
         }
     }
 
-
-    // Fix for the BitonicSort::bitonicSequenceGenerator function
+    // Generate bitonic sequence
     static void bitonicSequenceGenerator(int startIndex, int lastIndex, vector<int>& data) {
         int noOfElements = lastIndex - startIndex + 1;
         for (int j = 2; j <= noOfElements; j = j * 2) {
 #pragma omp parallel for
             for (int i = startIndex; i < startIndex + noOfElements; i = i + j) {
-                // Calculate end index, ensuring it doesn't go past the array bounds
                 int end = min(i + j - 1, startIndex + noOfElements - 1);
-
                 if (((i / j) % 2) == 0) {
-                    bitonicSortFromBitonicSequence(i, end, 1, data);
+                    bitonicSortFromBitonicSequence(i, end, 1, data); // Ascending
                 }
                 else {
-                    bitonicSortFromBitonicSequence(i, end, 0, data);
+                    bitonicSortFromBitonicSequence(i, end, 0, data); // Descending
                 }
             }
         }
     }
 
-
 public:
+    // Parallel Bitonic Sort using MPI
     static vector<int> parallelSort(const vector<int>& data, int world_size) {
         int world_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
@@ -501,95 +512,80 @@ public:
         vector<int> result;
 
         if (world_rank == 0) {
-            // Check if world_size is a power of 2
+            cout << "[Master] Bitonic sort initiated with " << world_size << " processes." << endl;
+
+            // Ensure world size is a power of two
             int power_of_two = 1;
             while (power_of_two < world_size) {
                 power_of_two *= 2;
             }
 
             if (power_of_two != world_size) {
-                cout << "Warning: Bitonic sort works best when the number of processes is a power of 2." << endl;
-                cout << "Current process count: " << world_size << ", nearest power of 2: " << power_of_two << endl;
+                cout << "[Master] Warning: Bitonic sort is optimal with power-of-two process counts." << endl;
             }
 
-            // Make a copy of the input data
             vector<int> input_data = data;
             int original_size = input_data.size();
+            int padded_size = nextPowerOfTwo(original_size); // Pad to power of 2
+            input_data.resize(padded_size, INT_MAX); // Pad with max int values
 
-            // Pad data to a power of 2
-            int padded_size = nextPowerOfTwo(original_size);
-            input_data.resize(padded_size, INT_MAX);
-
-            // Broadcast padded size and original size to all processes
+            // Broadcast padded and original size
             MPI_Bcast(&padded_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(&original_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            // Calculate elements per process
+            // Distribute elements equally
             int elements_per_proc = padded_size / world_size;
-
-            // Ensure elements_per_proc is at least 1
             if (elements_per_proc < 1) {
                 elements_per_proc = 1;
-                cout << "Warning: Data size is smaller than number of processes." << endl;
+                cout << "[Master] Warning: Data size is smaller than number of processes." << endl;
             }
 
-            // Send chunks to worker processes
             for (int i = 1; i < world_size; i++) {
                 int start_idx = i * elements_per_proc;
-                // Make sure we don't go out of bounds
-                if (start_idx < padded_size) {
-                    int chunk_size = min(elements_per_proc, padded_size - start_idx);
-                    MPI_Send(&chunk_size, 1, MPI_INT, i, 0, MPI_COMM_WORLD); // Send chunk size first
+                int chunk_size = (start_idx < padded_size) ? min(elements_per_proc, padded_size - start_idx) : 0;
+                MPI_Send(&chunk_size, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                if (chunk_size > 0) {
                     MPI_Send(&input_data[start_idx], chunk_size, MPI_INT, i, 0, MPI_COMM_WORLD);
-                }
-                else {
-                    // If we're out of data, send empty chunk
-                    int empty_size = 0;
-                    MPI_Send(&empty_size, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                    cout << "[Master] Sent chunk of size " << chunk_size << " to process " << i << "." << endl;
                 }
             }
 
-            // Process root's own chunk
+            // Master process sorts its own chunk
             int root_chunk_size = min(elements_per_proc, padded_size);
             vector<int> local_data(root_chunk_size);
             copy(input_data.begin(), input_data.begin() + root_chunk_size, local_data.begin());
+            cout << "[Master] Sorting local chunk of size " << root_chunk_size << "." << endl;
 
-            // Apply bitonic sort to local chunk
             if (root_chunk_size > 1) {
                 bitonicSequenceGenerator(0, root_chunk_size - 1, local_data);
             }
 
-            // Gather all sorted chunks
             vector<int> gathered_data(padded_size);
             copy(local_data.begin(), local_data.end(), gathered_data.begin());
 
-            // Receive sorted chunks from workers
+            // Receive sorted chunks from other processes
             for (int i = 1; i < world_size; i++) {
                 int start_idx = i * elements_per_proc;
                 if (start_idx < padded_size) {
                     int chunk_size = min(elements_per_proc, padded_size - start_idx);
                     MPI_Recv(&gathered_data[start_idx], chunk_size, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    cout << "[Master] Received sorted chunk of size " << chunk_size << " from process " << i << "." << endl;
                 }
             }
 
-            // Final merge phase to combine all sorted chunks into a single sorted sequence
+            // Final bitonic merging
             vector<int> merged_data = gathered_data;
-
-            // Perform global bitonic merge steps
             for (int j = world_size; j <= padded_size; j *= 2) {
                 for (int i = 0; i < padded_size; i += j) {
-                    int mid = i + j / 2 - 1;
                     int end = min(i + j - 1, padded_size - 1);
-
-                    if (end >= i) { // Ensure valid range
-                        // Determine sort direction based on block position
-                        int dir = ((i / j) % 2 == 0) ? 1 : 0;
+                    int dir = ((i / j) % 2 == 0) ? 1 : 0; // Ascending or Descending
+                    if (end >= i) {
                         bitonicSortFromBitonicSequence(i, end, dir, merged_data);
                     }
                 }
             }
 
-            // Create final sorted result, removing INT_MAX padding values
+            // Remove padded INT_MAX values
             result.clear();
             for (int i = 0; i < padded_size && result.size() < original_size; i++) {
                 if (merged_data[i] != INT_MAX) {
@@ -597,45 +593,44 @@ public:
                 }
             }
 
-            // If we don't have enough values (might happen if input has INT_MAX values)
-            // Just take the first 'original_size' elements
+            // Edge case: fallback if trimming fails
             if (result.size() < original_size) {
                 result.resize(original_size);
                 copy(merged_data.begin(), merged_data.begin() + original_size, result.begin());
             }
 
-            // Visualize results
+            cout << "[Master] Bitonic sort completed. Final result size: " << result.size() << "." << endl;
             IOHandler::visualizeData(result, "Bitonic Sort");
         }
         else {
-            // Worker process
-            // Receive broadcast of sizes
+            // Other processes receive metadata
             int padded_size, original_size;
             MPI_Bcast(&padded_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(&original_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            // Receive chunk size first
+            // Receive chunk
             int chunk_size;
             MPI_Recv(&chunk_size, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cout << "[Process " << world_rank << "] Received chunk size: " << chunk_size << "." << endl;
 
             if (chunk_size > 0) {
-                // Receive local data chunk
                 vector<int> local_data(chunk_size);
                 MPI_Recv(local_data.data(), chunk_size, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                // Apply bitonic sort to local chunk if it contains more than one element
+                // Local sorting
+                cout << "[Process " << world_rank << "] Performing local sort on received chunk." << endl;
                 if (chunk_size > 1) {
                     bitonicSequenceGenerator(0, chunk_size - 1, local_data);
                 }
 
-                // Send sorted data back to master
+                // Send back sorted data
                 MPI_Send(local_data.data(), chunk_size, MPI_INT, 0, 1, MPI_COMM_WORLD);
+                cout << "[Process " << world_rank << "] Sent sorted chunk back to master." << endl;
             }
         }
 
         return result;
     }
-
 };
 
 
@@ -652,8 +647,13 @@ public:
         vector<int> result;
 
         if (world_rank == 0) {
+         
+            cout << endl << "[Master] Finding maximum value to determine digit count...\n";
+
             // Find maximum number to know number of digits
             int max_num = getMax(data);
+
+            cout << endl << "[Master] Distributing data to worker processes...\n";
 
             // Calculate chunk size
             int chunk_size = data.size() / world_size;
@@ -683,7 +683,7 @@ public:
 
             // Process radix sort locally
             for (int exp = 1; max_num / exp > 0; exp *= 10) {
-                // Count sort on each digit
+                cout << "[Master] Performing count sort for digit place " << exp << "...\n";
                 countSort(local_chunk, exp);
 
                 // Tell workers to do the same
@@ -698,11 +698,12 @@ public:
                 MPI_Send(&end_signal, 1, MPI_INT, i, 1, MPI_COMM_WORLD);
             }
 
+            cout << "[Master] Gathering sorted chunks from worker processes...\n";
+
             // Gather all sorted chunks
             vector<int> sorted_chunks_sizes(world_size);
             sorted_chunks_sizes[0] = local_chunk.size();
 
-            // Calculate total size and displacements
             int total_size = local_chunk.size();
             for (int i = 1; i < world_size; i++) {
                 int size;
@@ -724,13 +725,16 @@ public:
                 offset += sorted_chunks_sizes[i];
             }
 
-            // Final merge sort to combine all sorted chunks
+            cout << "[Master] Final merge sort on gathered chunks...\n";
+
             result = mergeSort(result);
 
             // Visualize results
             IOHandler::visualizeData(result, "Radix Sort");
         }
         else {
+            cout << "[Worker " << world_rank << "] Waiting to receive data chunk...\n";
+
             // Worker process
             // Receive chunk
             int chunk_size;
@@ -747,7 +751,7 @@ public:
             int exp;
             while (true) {
                 MPI_Recv(&exp, 1, MPI_INT, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                if (exp == -1) break; // End signal
+                if (exp == -1) break;
 
                 // Count sort on this digit
                 countSort(local_chunk, exp);
@@ -773,7 +777,6 @@ private:
         vector<int> output(n);
         vector<int> count(10, 0);
 
-        // Store count of occurrences in count[]
         for (int i = 0; i < n; i++) {
             count[(arr[i] / exp) % 10]++;
         }
@@ -844,6 +847,7 @@ private:
     }
 };
 
+
 //=============================================================================
 // Algorithm 5: Sample Sort
 //=============================================================================
@@ -857,7 +861,9 @@ public:
         vector<int> result;
         int data_size = data.size();
 
-        // Broadcast data size
+
+
+
         MPI_Bcast(&data_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
         // Calculate local chunk size
@@ -865,11 +871,17 @@ public:
         int remainder = data_size % world_size;
         int local_size = (world_rank < remainder) ? chunk_size + 1 : chunk_size;
 
+
+
         // Allocate memory for local chunk
         vector<int> local_chunk(local_size);
 
         // Distribute data
         if (world_rank == 0) {
+            cout << endl << "[Master] Broadcasting data size...\n";
+            cout << endl << "[Master] Average chunk size per process: ~" << (data_size / world_size) << " elements\n";
+            cout << "[Master] Distributing data across " << world_size << " processes...\n";
+
             // Copy local chunk for master
             copy(data.begin(), data.begin() + local_size, local_chunk.begin());
 
@@ -880,6 +892,7 @@ public:
 
                 MPI_Send(&data[recv_start], recv_size, MPI_INT, i, 0, MPI_COMM_WORLD);
             }
+            cout << endl << "[Master] Initial data distribution complete.\n";
         }
         else {
             // Receive local chunk
@@ -889,227 +902,226 @@ public:
         // Sort local chunk
         sort(local_chunk.begin(), local_chunk.end());
 
-        // Choose regular samples from each process
-        int samples_per_proc = world_size - 1;
+        if (world_rank == 0) {
+            cout << "[Master] Each process has sorted its local chunk.\n";
+            cout << "[Master] Selecting sample elements for pivot determination...\n";
+        }
+
+        // ---- Optimized sampling ----
+        // Each process selects regular samples (world_size-1 samples)
         vector<int> local_samples;
 
-        // Ensure we have enough elements to sample
-        if (local_size > 1) {
-            local_samples.resize(min(samples_per_proc, local_size - 1));
-            double step = static_cast<double>(local_size - 1) / (local_samples.size() + 1);
-            for (int i = 0; i < local_samples.size(); i++) {
-                int idx = static_cast<int>((i + 1) * step + 0.5);
-                local_samples[i] = local_chunk[idx];
+        // Make sure we have enough elements to sample
+        if (local_size >= world_size) {
+            local_samples.resize(world_size - 1);
+            double step = static_cast<double>(local_size) / world_size;
+
+            for (int i = 1; i < world_size; i++) {
+                int idx = static_cast<int>(i * step);
+                if (idx < local_size) {
+                    local_samples[i - 1] = local_chunk[idx];
+                }
+                else {
+                    // Use the last element if index is out of bounds
+                    local_samples[i - 1] = local_chunk.back();
+                }
             }
         }
-        else if (local_size == 1) {
-            local_samples = { local_chunk[0] };
+        else {
+            // If we don't have enough elements, just use what we have
+            for (int i = 0; i < local_size; i++) {
+                local_samples.push_back(local_chunk[i]);
+            }
         }
 
         // Gather all samples at rank 0
+        int local_sample_count = local_samples.size();
+        vector<int> all_sample_counts(world_size);
+
+        MPI_Gather(&local_sample_count, 1, MPI_INT,
+            all_sample_counts.data(), 1, MPI_INT,
+            0, MPI_COMM_WORLD);
+
         vector<int> all_samples;
+        vector<int> displacements;
 
         if (world_rank == 0) {
-            // First, gather the sizes of samples
-            vector<int> sample_sizes(world_size);
-            int local_sample_size = local_samples.size();
-
-            MPI_Gather(&local_sample_size, 1, MPI_INT, sample_sizes.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-            // Calculate displacements and total size
-            vector<int> displacements(world_size);
+            // Calculate displacements and total samples
+            displacements.resize(world_size);
             int total_samples = 0;
+
             for (int i = 0; i < world_size; i++) {
                 displacements[i] = total_samples;
-                total_samples += sample_sizes[i];
+                total_samples += all_sample_counts[i];
             }
 
-            // Resize all_samples to hold all samples
+            // Resize to hold all samples
             all_samples.resize(total_samples);
 
-            // Gather all samples
-            MPI_Gatherv(local_samples.data(), local_samples.size(), MPI_INT,
-                all_samples.data(), sample_sizes.data(), displacements.data(),
-                MPI_INT, 0, MPI_COMM_WORLD);
+            cout << "[Master] Gathering " << total_samples << " samples for pivot selection...\n";
+        }
 
-            // Sort all samples
+        // Gather all samples
+        MPI_Gatherv(local_samples.data(), local_sample_count, MPI_INT,
+            all_samples.data(), all_sample_counts.data(), displacements.data(),
+            MPI_INT, 0, MPI_COMM_WORLD);
+
+        // Select and broadcast pivots
+        vector<int> pivots;
+
+        if (world_rank == 0) {
+            cout << "[Master] Selecting pivots from gathered samples...\n";
+
+            // Sort the gathered samples
             sort(all_samples.begin(), all_samples.end());
 
-            // Select pivots (world_size-1 pivots)
-            vector<int> pivots;
-            if (all_samples.size() >= world_size - 1) {
-                pivots.resize(world_size - 1);
-                double step = static_cast<double>(all_samples.size()) / world_size;
-                for (int i = 0; i < world_size - 1; i++) {
-                    int idx = static_cast<int>((i + 1) * step + 0.5);
-                    pivots[i] = all_samples[idx];
-                }
-            }
-            else {
-                // Handle edge case: not enough samples
-                pivots = all_samples;
-            }
-
-            // Broadcast pivot size and pivots to all processes
-            int pivot_size = pivots.size();
-            MPI_Bcast(&pivot_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-            if (pivot_size > 0) {
-                MPI_Bcast(pivots.data(), pivot_size, MPI_INT, 0, MPI_COMM_WORLD);
-            }
-
-            // Partition local data based on pivots
-            vector<vector<int>> partitions(world_size);
-
-            for (int value : local_chunk) {
-                int partition_idx = 0;
-                while (partition_idx < pivot_size && value > pivots[partition_idx]) {
-                    partition_idx++;
-                }
-                partitions[partition_idx].push_back(value);
-            }
-
-            // Exchange partitions among processes
-            // Send sizes and data to each process
-            for (int i = 1; i < world_size; i++) {
-                for (int p = 0; p < world_size; p++) {
-                    int size = partitions[p].size();
-                    MPI_Send(&size, 1, MPI_INT, i, 2, MPI_COMM_WORLD);
-
-                    if (size > 0) {
-                        MPI_Send(partitions[p].data(), size, MPI_INT, i, 2, MPI_COMM_WORLD);
-                    }
-                }
-            }
-
-            // Receive partitions from other processes for bucket 0
-            for (int i = 1; i < world_size; i++) {
-                int size;
-                MPI_Recv(&size, 1, MPI_INT, i, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                if (size > 0) {
-                    vector<int> received(size);
-                    MPI_Recv(received.data(), size, MPI_INT, i, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    partitions[0].insert(partitions[0].end(), received.begin(), received.end());
-                }
-            }
-
-            // Sort the local bucket
-            sort(partitions[0].begin(), partitions[0].end());
-
-            // Gather all sorted buckets
-            vector<int> bucket_sizes(world_size);
-            bucket_sizes[0] = partitions[0].size();
+            // Select world_size-1 evenly spaced pivots
+            pivots.resize(world_size - 1);
+            double step = static_cast<double>(all_samples.size()) / world_size;
 
             for (int i = 1; i < world_size; i++) {
-                MPI_Recv(&bucket_sizes[i], 1, MPI_INT, i, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                int idx = static_cast<int>(i * step);
+                if (idx < all_samples.size()) {
+                    pivots[i - 1] = all_samples[idx];
+                }
+                else {
+                    pivots[i - 1] = all_samples.back();
+                }
             }
 
-            // Calculate total size and prepare result vector
+            cout << "[Master] Broadcasting " << pivots.size() << " pivots to all processes...\n";
+        }
+
+        // Broadcast the number of pivots
+        int pivot_count = (world_rank == 0) ? pivots.size() : 0;
+        MPI_Bcast(&pivot_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        // Resize pivots on non-root processes and broadcast
+        if (world_rank != 0) {
+            pivots.resize(pivot_count);
+        }
+
+        MPI_Bcast(pivots.data(), pivot_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+        // ---- Optimized partitioning ----
+        if (world_rank == 0) {
+            cout << "[Master] Partitioning data based on pivots...\n";
+        }
+
+        // Each process partitions its local data
+        vector<vector<int>> buckets(world_size);
+
+        for (int value : local_chunk) {
+            int bucket = 0;
+            while (bucket < pivots.size() && value > pivots[bucket]) {
+                bucket++;
+            }
+            buckets[bucket].push_back(value);
+        }
+
+        // Optimized all-to-all communication
+        if (world_rank == 0) {
+            cout << "[Master] Exchanging partitioned data between processes...\n";
+        }
+
+        // First, gather the sizes of all buckets from all processes
+        vector<int> local_bucket_sizes(world_size);
+        for (int i = 0; i < world_size; i++) {
+            local_bucket_sizes[i] = buckets[i].size();
+        }
+
+        vector<int> all_bucket_sizes(world_size * world_size);
+
+        MPI_Allgather(local_bucket_sizes.data(), world_size, MPI_INT,
+            all_bucket_sizes.data(), world_size, MPI_INT,
+            MPI_COMM_WORLD);
+
+        // Each process will receive buckets from other processes
+        vector<int> recv_counts(world_size);
+        for (int i = 0; i < world_size; i++) {
+            recv_counts[i] = all_bucket_sizes[i * world_size + world_rank];
+        }
+
+        // Calculate the total size of the data each process will receive
+        int total_recv_size = 0;
+        for (int count : recv_counts) {
+            total_recv_size += count;
+        }
+
+        // Prepare send/receive displacements
+        vector<int> sdispls(world_size), rdispls(world_size);
+        int send_displ = 0, recv_displ = 0;
+
+        for (int i = 0; i < world_size; i++) {
+            sdispls[i] = send_displ;
+            send_displ += local_bucket_sizes[i];
+
+            rdispls[i] = recv_displ;
+            recv_displ += recv_counts[i];
+        }
+
+        // Flatten buckets into a single send buffer
+        vector<int> send_buffer;
+        for (const auto& bucket : buckets) {
+            send_buffer.insert(send_buffer.end(), bucket.begin(), bucket.end());
+        }
+
+        // Receive buffer for all-to-all data exchange
+        vector<int> recv_buffer(total_recv_size);
+
+        // Perform all-to-all data exchange
+        MPI_Alltoallv(send_buffer.data(), local_bucket_sizes.data(), sdispls.data(), MPI_INT,
+            recv_buffer.data(), recv_counts.data(), rdispls.data(), MPI_INT,
+            MPI_COMM_WORLD);
+
+        if (world_rank == 0) {
+            cout << "[Master] Each process sorting its final bucket...\n";
+        }
+
+        // Sort received data
+        sort(recv_buffer.begin(), recv_buffer.end());
+
+        // Gather the sizes of sorted buckets at root
+        int local_sorted_size = recv_buffer.size();
+        vector<int> sorted_sizes(world_size);
+
+        MPI_Gather(&local_sorted_size, 1, MPI_INT,
+            sorted_sizes.data(), 1, MPI_INT,
+            0, MPI_COMM_WORLD);
+
+        if (world_rank == 0) {
+            // Calculate displacements for gathering final results
+            displacements.resize(world_size);
             int total_size = 0;
-            for (int size : bucket_sizes) {
-                total_size += size;
+
+            for (int i = 0; i < world_size; i++) {
+                displacements[i] = total_size;
+                total_size += sorted_sizes[i];
             }
 
+            // Resize result vector to hold all sorted data
             result.resize(total_size);
 
-            // Copy master's bucket
-            copy(partitions[0].begin(), partitions[0].end(), result.begin());
+            cout << "[Master] Gathering all sorted data to create final result...\n";
+        }
 
-            // Receive sorted buckets from workers
-            int offset = bucket_sizes[0];
-            for (int i = 1; i < world_size; i++) {
-                if (bucket_sizes[i] > 0) {
-                    MPI_Recv(&result[offset], bucket_sizes[i], MPI_INT, i, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    offset += bucket_sizes[i];
-                }
-            }
+        // Gather all sorted data
+        MPI_Gatherv(recv_buffer.data(), local_sorted_size, MPI_INT,
+            result.data(), sorted_sizes.data(), displacements.data(),
+            MPI_INT, 0, MPI_COMM_WORLD);
+
+        if (world_rank == 0) {
+            cout << "[Master] Sample Sort complete!\n";
 
             // Visualize results
             IOHandler::visualizeData(result, "Sample Sort");
-        }
-        else {
-            // Worker processes
-
-            // First, gather the sizes of samples
-            int local_sample_size = local_samples.size();
-            MPI_Gather(&local_sample_size, 1, MPI_INT, nullptr, 0, MPI_INT, 0, MPI_COMM_WORLD);
-
-            // Gather all samples
-            MPI_Gatherv(local_samples.data(), local_samples.size(), MPI_INT,
-                nullptr, nullptr, nullptr, MPI_INT, 0, MPI_COMM_WORLD);
-
-            // Receive pivots from master
-            int pivot_size;
-            MPI_Bcast(&pivot_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-            vector<int> pivots(pivot_size);
-            if (pivot_size > 0) {
-                MPI_Bcast(pivots.data(), pivot_size, MPI_INT, 0, MPI_COMM_WORLD);
-            }
-
-            // Partition local data based on pivots
-            vector<vector<int>> partitions(world_size);
-
-            for (int value : local_chunk) {
-                int partition_idx = 0;
-                while (partition_idx < pivot_size && value > pivots[partition_idx]) {
-                    partition_idx++;
-                }
-                partitions[partition_idx].push_back(value);
-            }
-
-            // Receive partitions from master and other processes
-            vector<vector<int>> received_partitions(world_size);
-
-            for (int p = 0; p < world_size; p++) {
-                int size;
-                MPI_Recv(&size, 1, MPI_INT, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                if (size > 0) {
-                    received_partitions[p].resize(size);
-                    MPI_Recv(received_partitions[p].data(), size, MPI_INT, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                }
-            }
-
-            // Send local partitions to the corresponding processes
-            for (int p = 0; p < world_size; p++) {
-                if (p != world_rank) {
-                    int size = partitions[p].size();
-                    MPI_Send(&size, 1, MPI_INT, p, 3, MPI_COMM_WORLD);
-
-                    if (size > 0) {
-                        MPI_Send(partitions[p].data(), size, MPI_INT, p, 3, MPI_COMM_WORLD);
-                    }
-                }
-            }
-
-            // Add received elements for my bucket
-            for (int p = 0; p < world_size; p++) {
-                if (p != world_rank && !received_partitions[world_rank].empty()) {
-                    partitions[world_rank].insert(
-                        partitions[world_rank].end(),
-                        received_partitions[world_rank].begin(),
-                        received_partitions[world_rank].end()
-                    );
-                }
-            }
-
-            // Sort my bucket
-            sort(partitions[world_rank].begin(), partitions[world_rank].end());
-
-            // Send bucket size to master
-            int bucket_size = partitions[world_rank].size();
-            MPI_Send(&bucket_size, 1, MPI_INT, 0, 4, MPI_COMM_WORLD);
-
-            // Send sorted bucket to master
-            if (bucket_size > 0) {
-                MPI_Send(partitions[world_rank].data(), bucket_size, MPI_INT, 0, 4, MPI_COMM_WORLD);
-            }
         }
 
         return result;
     }
 };
+
+
 
 //=============================================================================
 // Main Function
@@ -1171,8 +1183,12 @@ int main(int argc, char** argv) {
         switch (algorithm_choice) {
         case 1: // Quick Search
         {
+            cout << endl << "-----------------------------" << endl;
+            cout << " Quick Search Selected " << endl;
+            cout << "-----------------------------" << endl;
+
             int search_value;
-            cout << "Enter value to search: ";
+            cout << endl << "Enter value to search: ";
             cin >> search_value;
 
             // Broadcast search value before timing starts
@@ -1180,25 +1196,32 @@ int main(int argc, char** argv) {
 
             // Start timing only for algorithm execution
             timer.start();
-            bool found = QuickSearch::parallelSearch(data, search_value, world_size);
+            int index = QuickSearch::parallelSearch(data, search_value, world_size);
             elapsed = timer.stop();
 
-            cout << "Value " << search_value << (found ? " found" : " not found") << endl;
+            if (index == -1) {
+                cout << endl << "Result: Value " << search_value << " not found" << endl;
+            }
+       
         }
         break;
 
+
         case 2: // Prime Number Finding
         {
+            cout << endl << "-----------------------------" << endl;
+            cout << " Prime Number Selected " << endl;
+            cout << "-----------------------------" << endl;
             // Start timer just before algorithm execution
             timer.start();
             vector<int> primes = PrimeFinder::findPrimes(data, world_size);
             elapsed = timer.stop();
 
-            cout << "Found " << primes.size() << " prime numbers in the input data" << endl;
+            cout << endl << "Found " << primes.size() << " prime numbers in the input data" << endl;
 
             // Save results to file - AFTER TIMING ENDS
             string output_path;
-            cout << "Enter path to save results: ";
+            cout << endl << "Enter path to save results: ";
             cin >> output_path;
             IOHandler::writeOutputFile(output_path, primes);
         }
@@ -1206,16 +1229,20 @@ int main(int argc, char** argv) {
 
         case 3: // Bitonic Sort
         {
+            cout << endl << "-----------------------------" << endl;
+            cout << " Bitonic Sort Selected " << endl;
+            cout << "-----------------------------" << endl;
+
             // Start timer just before algorithm execution
             timer.start();
             vector<int> sorted_data = BitonicSort::parallelSort(data, world_size);
             elapsed = timer.stop();
 
-            cout << "Sorted " << sorted_data.size() << " elements using Bitonic Sort" << endl;
+            cout << endl << "Sorted " << sorted_data.size() << " elements using Bitonic Sort" << endl;
 
             // Save results to file - AFTER TIMING ENDS
             string output_path;
-            cout << "Enter path to save results: ";
+            cout << endl << "Enter path to save results: ";
             cin >> output_path;
             IOHandler::writeOutputFile(output_path, sorted_data);
         }
@@ -1223,16 +1250,19 @@ int main(int argc, char** argv) {
 
         case 4: // Radix Sort
         {
+            cout << endl << "-----------------------------" << endl;
+            cout << " Radix Sort Selected " << endl;
+            cout << "-----------------------------" << endl;
             // Start timer just before algorithm execution
             timer.start();
             vector<int> sorted_data = RadixSort::parallelSort(data, world_size);
             elapsed = timer.stop();
 
-            cout << "Sorted " << sorted_data.size() << " elements using Radix Sort" << endl;
+            cout << endl << "Sorted " << sorted_data.size() << " elements using Radix Sort" << endl;
 
             // Save results to file - AFTER TIMING ENDS
             string output_path;
-            cout << "Enter path to save results: ";
+            cout << endl << "Enter path to save results: ";
             cin >> output_path;
             IOHandler::writeOutputFile(output_path, sorted_data);
         }
@@ -1240,28 +1270,31 @@ int main(int argc, char** argv) {
 
         case 5: // Sample Sort
         {
+            cout << endl << "-----------------------------" << endl;
+            cout << " Sample Sort Selected " << endl;
+            cout << "-----------------------------" << endl;
             // Start timer just before algorithm execution
             timer.start();
             vector<int> sorted_data = SampleSort::parallelSort(data, world_size);
             elapsed = timer.stop();
 
-            cout << "Sorted " << sorted_data.size() << " elements using Sample Sort" << endl;
+            cout << endl << "Sorted " << sorted_data.size() << " elements using Sample Sort" << endl;
 
             // Save results to file - AFTER TIMING ENDS
             string output_path;
-            cout << "Enter path to save results: ";
+            cout << endl << "Enter path to save results: ";
             cin >> output_path;
             IOHandler::writeOutputFile(output_path, sorted_data);
         }
         break;
 
         default:
-            cout << "Invalid algorithm choice!" << endl;
+            cout << endl << "Invalid algorithm choice!" << endl;
             break;
         }
 
         // Display execution time of only the algorithm
-        cout << "Algorithm execution time: " << elapsed << " seconds" << endl;
+        cout << endl << "Algorithm execution time: " << elapsed << " seconds" << endl;
     }
     else {
         // Worker processes
