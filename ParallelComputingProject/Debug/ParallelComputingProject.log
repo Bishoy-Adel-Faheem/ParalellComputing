@@ -1,10 +1,6 @@
 ﻿  main.cpp
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(140,1): warning C4010: single-line comment contains line-continuation character
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(196,21): warning C4018: '>': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(472,37): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(472,74): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(589,62): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(596,31): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(969,25): warning C4018: '<': signed/unsigned mismatch
-D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\ParallelComputingProject\main.cpp(1001,27): warning C4018: '<': signed/unsigned mismatch
-  ParallelComputingProject.vcxproj -> D:\Materials\Semester 8\Parallel Computation\Labs\ParallelComputingProject\Debug\ParallelComputingProject.exe
+E:\FCI\4th year\2\Parallel Computation\Project Last Edits\ParallelComputingProject\main.cpp(218,37): warning C4018: '<': signed/unsigned mismatch
+E:\FCI\4th year\2\Parallel Computation\Project Last Edits\ParallelComputingProject\main.cpp(218,74): warning C4018: '<': signed/unsigned mismatch
+E:\FCI\4th year\2\Parallel Computation\Project Last Edits\ParallelComputingProject\main.cpp(606,38): warning C4018: '<': signed/unsigned mismatch
+E:\FCI\4th year\2\Parallel Computation\Project Last Edits\ParallelComputingProject\main.cpp(621,27): warning C4018: '<': signed/unsigned mismatch
+  ParallelComputingProject.vcxproj -> E:\FCI\4th year\2\Parallel Computation\Project Last Edits\Debug\ParallelComputingProject.exe
