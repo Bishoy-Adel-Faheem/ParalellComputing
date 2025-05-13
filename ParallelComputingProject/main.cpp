@@ -1,10 +1,11 @@
-#include <mpi.h>
+﻿#include <mpi.h>
 #include <iostream>
 #include <vector>
 #include <string>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <unordered_set> 
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -13,11 +14,11 @@
 #include <climits>
 #include <cerrno>
 
+
 using namespace std;
 
-// Platform-specific includes for directory operations
 
-#include <direct.h>  // For _mkdir on Windows
+#include <direct.h>  
 #define MKDIR(dir) _mkdir(dir)
 
 
@@ -57,10 +58,6 @@ public:
         size_t lastSlash = fullPath.find_last_of("/\\");
         string directoryPath;
 
-        if (lastSlash != string::npos) {
-            directoryPath = fullPath.substr(0, lastSlash);
-            ensureDirectoryExists(directoryPath);
-        }
 
         ofstream file(fullPath);
 
@@ -96,109 +93,11 @@ public:
         }
         else {
             // Use platform-appropriate path separators
-#ifdef _WIN32
+
             return directory + "\\" + filename;
-#else
-            return directory + "/" + filename;
-#endif
         }
     }
 
-    // Ensure directory exists, create if needed
-    static bool ensureDirectoryExists(const string& directory) {
-        // Check if directory already exists
-        struct stat info;
-        if (stat(directory.c_str(), &info) == 0) {
-            return (info.st_mode & S_IFDIR) != 0;  // Return true if it's a directory
-        }
-
-        // Create the directory path recursively
-        size_t position = 0;
-        string currentPath;
-        int result = 0;
-
-        // Skip device part (e.g., C:)
-        if (directory.length() >= 2 && directory[1] == ':') {
-            currentPath = directory.substr(0, 2);
-            position = 2;
-        }
-
-        // Create each directory in the path
-        while (position < directory.length()) {
-            position = directory.find_first_of("/\\", position);
-
-            if (position == string::npos) {
-                // Last part of the path
-                currentPath = directory;
-            }
-            else {
-                currentPath = directory.substr(0, position++);
-            }
-
-            if (!currentPath.empty()) {
-                // Skip if it's just a separator like C:\
-                if (currentPath.length() <= 3 && currentPath.back() == '\\') {
-                continue;
-            }
-
-            result = MKDIR(currentPath.c_str());
-
-            if (result != 0 && errno != EEXIST) {
-                cerr << "Error creating directory: " << currentPath << endl;
-                return false;
-            }
-            if (position == string::npos) {
-                break;
-            }
-        }
-
-
-        return true;
-    }
-
-    
-
-
-// Visualization function
-static void visualizeData(const vector<int>& data, const string& title) {
-    // Simple console visualization
-    cout << "Data Visualization: " << title << endl;
-    cout << "------------------------" << endl;
-
-    if (data.empty()) {
-        cout << "No data to visualize." << endl;
-        cout << "------------------------" << endl;
-        return;
-    }
-
-    // Find min and max for scaling
-    int min_val = *min_element(data.begin(), data.end());
-    int max_val = *max_element(data.begin(), data.end());
-    int range = max_val - min_val;
-
-    // Display up to 20 elements with simple bar chart
-    int display_limit = min(20, static_cast<int>(data.size()));
-    for (int i = 0; i < display_limit; ++i) {
-        cout << data[i] << ": ";
-
-        // Normalize to 0-50 range for display
-        int bar_length = 1;
-        if (range > 0) {
-            bar_length = 1 + (data[i] - min_val) * 49 / range;
-        }
-
-        for (int j = 0; j < bar_length; ++j) {
-            cout << "#";
-        }
-        cout << endl;
-    }
-
-    if (data.size() > display_limit) {
-        cout << "... and " << (data.size() - display_limit) << " more values" << endl;
-    }
-
-    cout << "------------------------" << endl;
-}
 };
 
 //=============================================================================
@@ -229,40 +128,41 @@ private:
 
 class QuickSearch {
 public:
-    static int parallelSearch(const vector<int>& data, int search_value, int world_size) {
+    static vector<int> parallelSearch(const vector<int>& data, int search_value, int world_size) {
         int world_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-        // Logging
-        if (world_rank == 0) {
-            cout << endl << "Distributing data across processes..." << endl;
-        }
-
         int data_size = data.size();
 
-        // Broadcast the data size
+        // Logging
+        if (world_rank == 0) {
+            cout << endl << "[Master] Broadcasting data size...\n";
+            cout << endl << "[Master] Average chunk size per process: ~" << (data_size / world_size) << " elements\n";
+            cout << "[Master] Distributing data across " << world_size << " processes...\n";
+        }
+
+        // Broadcast the data size to all processes
         MPI_Bcast(&data_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-        // Calculate chunk size and offset
+        // Calculate the base chunk size and remainder
         int chunk_size = data_size / world_size;
         int remainder = data_size % world_size;
 
-        // Each process will have at least chunk_size elements
-        // The first 'remainder' processes get one extra element
+        // Determine the local chunk size for this process
         int local_size = (world_rank < remainder) ? chunk_size + 1 : chunk_size;
 
-        // Calculate local offset for this process
+        // Calculate the starting index in the global array for this process
         int local_offset = world_rank * chunk_size + min(world_rank, remainder);
 
-        // Allocate memory for local chunk
+        // Allocate memory for the local chunk
         vector<int> local_data(local_size);
 
-        // Distribute data to all processes
+        // Master process distributes the data
         if (world_rank == 0) {
             // Copy master's portion
             copy(data.begin(), data.begin() + local_size, local_data.begin());
 
-            // Master sends data to all other processes
+            // Send remaining chunks to other processes
             for (int i = 1; i < world_size; ++i) {
                 int recipient_size = (i < remainder) ? chunk_size + 1 : chunk_size;
                 int recipient_start = i * chunk_size + min(i, remainder);
@@ -271,37 +171,75 @@ public:
             }
         }
         else {
-            // Receive data from master
+            // Receive data chunk from master
             MPI_Status status;
             MPI_Recv(local_data.data(), local_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         }
 
-        // Each process searches its chunk and returns local index if found
-        int local_result = searchInChunk(local_data, search_value);
+        // Logging chunk assignment
+        cout << endl << "[Process " << world_rank << "] Received " << local_size << " elements." << endl;
 
-        // Convert local index to global index if found
-        int global_result = -1;
-        if (local_result != -1) {
-            global_result = local_offset + local_result;
-            // Print which process found the value and at what index
-            cout << "[Process " << world_rank << "] Found value " << search_value << " at index " << global_result << endl;
+        // Each process finds all matching indices locally
+        vector<int> local_indices = searchAllInChunk(local_data, search_value);
 
+        // Convert local indices to global indices
+        for (int& idx : local_indices) {
+            idx += local_offset;
         }
 
-        // Gather results
-        int final_result = -1;
-        MPI_Allreduce(&global_result, &final_result, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        // Determine the max number of matches any process found (needed for gather)
+        int local_count = local_indices.size();
+        int max_count;
+        MPI_Allreduce(&local_count, &max_count, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-        return final_result;
+        // Pad local indices to match max_count for uniform gathering
+        local_indices.resize(max_count, -1);
+
+        // Allocate buffer on root to collect all results
+        vector<int> all_indices;
+        if (world_rank == 0) {
+            all_indices.resize(world_size * max_count);
+        }
+
+        // Gather all results at root
+        MPI_Gather(local_indices.data(), max_count, MPI_INT,
+            all_indices.data(), max_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+        // Root prints final results
+        if (world_rank == 0) {
+            for (int rank = 0; rank < world_size; ++rank) {
+                for (int j = 0; j < max_count; ++j) {
+                    int value = all_indices[rank * max_count + j];
+                    if (value != -1) {
+                        cout << endl << "[Process " << rank << "] Found value " << search_value << " at index " << value << endl;
+                    }
+                }
+            }
+
+            // Collect and return all valid results
+            vector<int> final_results;
+            for (int value : all_indices) {
+                if (value != -1) {
+                    final_results.push_back(value);
+                }
+            }
+            return final_results;
+        }
+
+        // Other processes return an empty vector
+        return {};
     }
 
 private:
-    static int searchInChunk(const vector<int>& chunk, int search_value) {
-        auto it = find(chunk.begin(), chunk.end(), search_value);
-        if (it != chunk.end()) {
-            return distance(chunk.begin(), it);
+    // Search for all occurrences of the search value in a chunk
+    static vector<int> searchAllInChunk(const vector<int>& chunk, int search_value) {
+        vector<int> indices;
+        for (int i = 0; i < chunk.size(); ++i) {
+            if (chunk[i] == search_value) {
+                indices.push_back(i);
+            }
         }
-        return -1;  // Not found
+        return indices;
     }
 };
 
@@ -310,133 +248,123 @@ private:
 // Algorithm 2: Prime Number Finding
 //=============================================================================
 
-class PrimeFinder {
+class ParallelPrimeFinder {
+private:
+    // Rank of the current process and total number of processes
+    int world_rank, world_size;
+
+    // Global range to search for prime numbers
+    int global_start = 1, global_end = 100000;
+
+    // Local and global vectors to store found prime numbers
+    std::vector<int> local_primes;
+    std::vector<int> global_primes;
+
+    // Check if a number is prime
+    bool isPrime(int num) {
+        if (num < 2) return false;
+        for (int i = 2; i <= std::sqrt(num); ++i)
+            if (num % i == 0) return false;
+        return true;
+    }
+
+    // Calculate the range each process will be responsible for
+    void calculateLocalRange(int& local_start, int& local_end) {
+        int total_range = global_end - global_start + 1;
+
+        // Base range for each process and remaining numbers
+        int base = total_range / world_size;
+        int remainder = total_range % world_size;
+
+        // Calculate local start and end for each process
+        local_start = global_start + world_rank * base + std::min(world_rank, remainder);
+        local_end = local_start + base - 1;
+        if (world_rank < remainder) local_end += 1;
+    }
+
 public:
-    static vector<int> findPrimes(const vector<int>& data, int world_size) {
-        int world_rank;
+    // Set the range of numbers to search for primes
+    void setRange(int start, int end) {
+        global_start = start;
+        global_end = end;
+    }
+
+    // Initialize MPI environment
+    void initialize() {
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    }
 
-        // Logging header
+    // Entry point for finding primes in parallel
+    std::vector<int> run() {
+        initialize();          // Get MPI rank and size
+        findLocalPrimes();     // Each process finds primes in its range
+        gatherResults();       // Gather all primes to rank 0
+
+        // Only rank 0 processes the final result
         if (world_rank == 0) {
-
-            cout << endl << "Reading data and distributing to processes..." << endl;
-        }
-        // First broadcast the data size
-        int data_size = data.size();
-        MPI_Bcast(&data_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-        // Calculate chunk size for data distribution
-        int chunk_size = data_size / world_size;
-        int remainder = data_size % world_size;
-
-        // Each process will have at least chunk_size elements
-        // The first 'remainder' processes get one extra element
-        int local_size = (world_rank < remainder) ? chunk_size + 1 : chunk_size;
-
-        // Allocate memory for local chunk
-        vector<int> local_data(local_size);
-
-        // Distribute data to all processes
-        if (world_rank == 0) {
-            // Copy master's portion
-            copy(data.begin(), data.begin() + local_size, local_data.begin());
-
-            // Master sends data to all other processes
-            for (int i = 1; i < world_size; ++i) {
-                int recipient_size = (i < remainder) ? chunk_size + 1 : chunk_size;
-                int recipient_start = i * chunk_size + min(i, remainder);
-
-                MPI_Send(&data[recipient_start], recipient_size, MPI_INT, i, 0, MPI_COMM_WORLD);
-            }
-        }
-        else {
-            // Receive data from master
-            MPI_Status status;
-            MPI_Recv(local_data.data(), local_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+            // Remove duplicates and sort the final list
+            std::unordered_set<int> unique(global_primes.begin(), global_primes.end());
+            std::vector<int> final_primes(unique.begin(), unique.end());
+            std::sort(final_primes.begin(), final_primes.end());
+            return final_primes;
         }
 
+        // Other processes return an empty vector
+        return std::vector<int>();
+    }
 
-        // Logging chunk assignment
-        cout << endl << "[Process " << world_rank << "] Received " << local_size << " elements." << endl;
+private:
+    // Find prime numbers in the local range assigned to the process
+    void findLocalPrimes() {
+        int local_start, local_end;
+        calculateLocalRange(local_start, local_end);
 
-
-        // Find primes in local data
-        vector<int> local_primes;
-        for (int num : local_data) {
+        // Check each number in the local range
+        for (int num = local_start; num <= local_end; ++num) {
             if (isPrime(num)) {
                 local_primes.push_back(num);
             }
         }
-
-        // Logging local prime results
-        cout << endl << "[Process " << world_rank << "] Found " << local_primes.size() << " prime numbers." << endl;
-
-        // Gather results
-        int local_count = local_primes.size();
-        vector<int> all_counts(world_size);
-
-        MPI_Gather(&local_count, 1, MPI_INT, all_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-        vector<int> global_primes;
-        if (world_rank == 0) {
-            // Calculate displacements for gathering
-            vector<int> displacements(world_size);
-            int total_count = 0;
-            for (int i = 0; i < world_size; ++i) {
-                displacements[i] = total_count;
-                total_count += all_counts[i];
-            }
-
-            // Resize global primes vector
-            global_primes.resize(total_count);
-
-            // Gather all primes
-            MPI_Gatherv(local_primes.data(), local_count, MPI_INT, global_primes.data(),
-                all_counts.data(), displacements.data(), MPI_INT, 0, MPI_COMM_WORLD);
-
-            // Remove duplicates and sort
-            sort(global_primes.begin(), global_primes.end());
-            auto last = unique(global_primes.begin(), global_primes.end());
-            global_primes.erase(last, global_primes.end());
-
-            // Final logging
-            cout << "[Master] Total unique primes found: " << global_primes.size() << endl;
-
-            // Visualize results
-            IOHandler::visualizeData(global_primes, "Prime Numbers in Input");
-        }
-        else {
-            // Non-root processes just send their data
-            MPI_Gatherv(local_primes.data(), local_count, MPI_INT, nullptr,
-                nullptr, nullptr, MPI_INT, 0, MPI_COMM_WORLD);
-        }
-
-        return global_primes;
     }
 
-private:
-    static bool isPrime(int number) {
-        if (number <= 1) return false;
-        if (number <= 3) return true;
-        if (number % 2 == 0 || number % 3 == 0) return false;
+    // Gather all local primes from every process to the root (rank 0)
+    void gatherResults() {
+        int local_size = local_primes.size();
 
-        for (int i = 5; i * i <= number; i += 6) {
-            if (number % i == 0 || number % (i + 2) == 0)
-                return false;
+        // Each process sends the size of its local_primes
+        std::vector<int> recvcounts(world_size);
+        MPI_Gather(&local_size, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        // Calculate displacements and total size on root process
+        std::vector<int> displs(world_size);
+        int total_size = 0;
+        if (world_rank == 0) {
+            displs[0] = 0;
+            for (int i = 1; i < world_size; ++i) {
+                displs[i] = displs[i - 1] + recvcounts[i - 1];
+            }
+            total_size = displs[world_size - 1] + recvcounts[world_size - 1];
+            global_primes.resize(total_size);
         }
 
-        return true;
+        // Gather all local prime vectors into global_primes on rank 0
+        MPI_Gatherv(
+            local_primes.data(), local_size, MPI_INT,
+            global_primes.data(), recvcounts.data(), displs.data(), MPI_INT,
+            0, MPI_COMM_WORLD
+        );
     }
 };
+
 
 //=============================================================================
 // Algorithm 3: Bitonic Sort
 //=============================================================================
 
-
 class BitonicSort {
 private:
-    // Function to find the next power of two greater than or equal to n
+    // Helper function to find the next power of two ≥ n
     static int nextPowerOfTwo(int n) {
         int power = 1;
         while (power < n) {
@@ -445,31 +373,32 @@ private:
         return power;
     }
 
-    // Swap elements in ascending order
+    // Swap two elements if out of ascending order
     static void ascendingSwap(int index1, int index2, vector<int>& data) {
         if (data[index2] < data[index1]) {
             swap(data[index1], data[index2]);
         }
     }
 
-    // Swap elements in descending order
+    // Swap two elements if out of descending order
     static void descendingSwap(int index1, int index2, vector<int>& data) {
         if (data[index1] < data[index2]) {
             swap(data[index1], data[index2]);
         }
     }
 
-    // Perform Bitonic Sort on a bitonic sequence
+    // Core part of bitonic sort: performs local ordering within a bitonic sequence
     static void bitonicSortFromBitonicSequence(int startIndex, int lastIndex, int dir, vector<int>& data) {
-        if (startIndex >= lastIndex) return; // Handle edge case
+        if (startIndex >= lastIndex) return;
 
         int counter = 0;
         int noOfElements = lastIndex - startIndex + 1;
-        for (int j = noOfElements / 2; j > 0; j = j / 2) {
+
+        // Iteratively compare and swap in pairs
+        for (int j = noOfElements / 2; j > 0; j /= 2) {
             counter = 0;
             for (int i = startIndex; i + j <= lastIndex; i++) {
                 if (counter < j) {
-                        // Ensure we don't access out of bounds
                     if (i >= 0 && i < data.size() && i + j >= 0 && i + j < data.size()) {
                         if (dir == 1)
                             ascendingSwap(i, i + j, data);
@@ -480,31 +409,33 @@ private:
                 }
                 else {
                     counter = 0;
-                    i = i + j - 1;
+                    i = i + j - 1; // skip next j items to avoid duplicate comparisons
                 }
             }
         }
     }
 
-    // Generate bitonic sequence
+    // Builds a bitonic sequence from a portion of the data
     static void bitonicSequenceGenerator(int startIndex, int lastIndex, vector<int>& data) {
         int noOfElements = lastIndex - startIndex + 1;
-        for (int j = 2; j <= noOfElements; j = j * 2) {
-#pragma omp parallel for
-            for (int i = startIndex; i < startIndex + noOfElements; i = i + j) {
+
+        // Create bitonic sequences by merging pairs of sorted subsequences
+        for (int j = 2; j <= noOfElements; j *= 2) {
+#pragma omp parallel for // Parallelize each merge step with OpenMP
+            for (int i = startIndex; i < startIndex + noOfElements; i += j) {
                 int end = min(i + j - 1, startIndex + noOfElements - 1);
                 if (((i / j) % 2) == 0) {
-                    bitonicSortFromBitonicSequence(i, end, 1, data); // Ascending
+                    bitonicSortFromBitonicSequence(i, end, 1, data);  // ascending
                 }
                 else {
-                    bitonicSortFromBitonicSequence(i, end, 0, data); // Descending
+                    bitonicSortFromBitonicSequence(i, end, 0, data);  // descending
                 }
             }
         }
     }
 
 public:
-    // Parallel Bitonic Sort using MPI
+    // Main function to perform parallel bitonic sort using MPI
     static vector<int> parallelSort(const vector<int>& data, int world_size) {
         int world_rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
@@ -514,7 +445,7 @@ public:
         if (world_rank == 0) {
             cout << "[Master] Bitonic sort initiated with " << world_size << " processes." << endl;
 
-            // Ensure world size is a power of two
+            // Ensure number of processes is a power of 2 (Bitonic sort works best this way)
             int power_of_two = 1;
             while (power_of_two < world_size) {
                 power_of_two *= 2;
@@ -526,27 +457,24 @@ public:
 
             vector<int> input_data = data;
             int original_size = input_data.size();
-            int padded_size = nextPowerOfTwo(original_size); // Pad to power of 2
-            input_data.resize(padded_size, INT_MAX); // Pad with max int values
+            int padded_size = nextPowerOfTwo(original_size);  // pad to power of 2
+            input_data.resize(padded_size, INT_MAX);          // pad with INT_MAX as sentinel
 
-            // Broadcast padded and original size
+            // Broadcast size information to all processes
             MPI_Bcast(&padded_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(&original_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            // Distribute elements equally
+            // Calculate how many elements each process will handle
             int elements_per_proc = padded_size / world_size;
-            if (elements_per_proc < 1) {
-                elements_per_proc = 1;
-                cout << "[Master] Warning: Data size is smaller than number of processes." << endl;
-            }
+            if (elements_per_proc < 1) elements_per_proc = 1;
 
+            // Distribute chunks of data to each worker process
             for (int i = 1; i < world_size; i++) {
                 int start_idx = i * elements_per_proc;
                 int chunk_size = (start_idx < padded_size) ? min(elements_per_proc, padded_size - start_idx) : 0;
                 MPI_Send(&chunk_size, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
                 if (chunk_size > 0) {
                     MPI_Send(&input_data[start_idx], chunk_size, MPI_INT, i, 0, MPI_COMM_WORLD);
-                    cout << "[Master] Sent chunk of size " << chunk_size << " to process " << i << "." << endl;
                 }
             }
 
@@ -554,82 +482,73 @@ public:
             int root_chunk_size = min(elements_per_proc, padded_size);
             vector<int> local_data(root_chunk_size);
             copy(input_data.begin(), input_data.begin() + root_chunk_size, local_data.begin());
-            cout << "[Master] Sorting local chunk of size " << root_chunk_size << "." << endl;
 
             if (root_chunk_size > 1) {
                 bitonicSequenceGenerator(0, root_chunk_size - 1, local_data);
             }
 
+            // Gather sorted chunks from all processes
             vector<int> gathered_data(padded_size);
             copy(local_data.begin(), local_data.end(), gathered_data.begin());
 
-            // Receive sorted chunks from other processes
             for (int i = 1; i < world_size; i++) {
                 int start_idx = i * elements_per_proc;
                 if (start_idx < padded_size) {
                     int chunk_size = min(elements_per_proc, padded_size - start_idx);
                     MPI_Recv(&gathered_data[start_idx], chunk_size, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    cout << "[Master] Received sorted chunk of size " << chunk_size << " from process " << i << "." << endl;
                 }
             }
 
-            // Final bitonic merging
-            vector<int> merged_data = gathered_data;
-            for (int j = world_size; j <= padded_size; j *= 2) {
-                for (int i = 0; i < padded_size; i += j) {
-                    int end = min(i + j - 1, padded_size - 1);
-                    int dir = ((i / j) % 2 == 0) ? 1 : 0; // Ascending or Descending
-                    if (end >= i) {
-                        bitonicSortFromBitonicSequence(i, end, dir, merged_data);
+            // Perform full bitonic merge on gathered data
+            for (int k = 2; k <= padded_size; k *= 2) {
+                for (int j = k / 2; j > 0; j /= 2) {
+                    for (int i = 0; i < padded_size; i++) {
+                        int l = i ^ j;
+                        if (l > i) {
+                            if ((i & k) == 0) {
+                                if (gathered_data[i] > gathered_data[l]) {
+                                    swap(gathered_data[i], gathered_data[l]);
+                                }
+                            }
+                            else {
+                                if (gathered_data[i] < gathered_data[l]) {
+                                    swap(gathered_data[i], gathered_data[l]);
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // Remove padded INT_MAX values
-            result.clear();
-            for (int i = 0; i < padded_size && result.size() < original_size; i++) {
-                if (merged_data[i] != INT_MAX) {
-                    result.push_back(merged_data[i]);
-                }
-            }
-
-            // Edge case: fallback if trimming fails
-            if (result.size() < original_size) {
-                result.resize(original_size);
-                copy(merged_data.begin(), merged_data.begin() + original_size, result.begin());
-            }
-
+            // Remove padding and return result
+            result.assign(gathered_data.begin(), gathered_data.begin() + original_size);
             cout << "[Master] Bitonic sort completed. Final result size: " << result.size() << "." << endl;
-            IOHandler::visualizeData(result, "Bitonic Sort");
         }
         else {
-            // Other processes receive metadata
+            // Worker processes
+
+            // Receive size information from master
             int padded_size, original_size;
             MPI_Bcast(&padded_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(&original_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            // Receive chunk
             int chunk_size;
             MPI_Recv(&chunk_size, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            cout << "[Process " << world_rank << "] Received chunk size: " << chunk_size << "." << endl;
 
             if (chunk_size > 0) {
                 vector<int> local_data(chunk_size);
                 MPI_Recv(local_data.data(), chunk_size, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                // Local sorting
-                cout << "[Process " << world_rank << "] Performing local sort on received chunk." << endl;
                 if (chunk_size > 1) {
                     bitonicSequenceGenerator(0, chunk_size - 1, local_data);
                 }
 
-                // Send back sorted data
+                // Send sorted chunk back to master
                 MPI_Send(local_data.data(), chunk_size, MPI_INT, 0, 1, MPI_COMM_WORLD);
-                cout << "[Process " << world_rank << "] Sent sorted chunk back to master." << endl;
             }
         }
 
-        return result;
+        return result;  // only master returns the sorted vector
     }
 };
 
@@ -683,7 +602,6 @@ public:
 
             // Process radix sort locally
             for (int exp = 1; max_num / exp > 0; exp *= 10) {
-                cout << "[Master] Performing count sort for digit place " << exp << "...\n";
                 countSort(local_chunk, exp);
 
                 // Tell workers to do the same
@@ -729,11 +647,8 @@ public:
 
             result = mergeSort(result);
 
-            // Visualize results
-            IOHandler::visualizeData(result, "Radix Sort");
         }
         else {
-            cout << "[Worker " << world_rank << "] Waiting to receive data chunk...\n";
 
             // Worker process
             // Receive chunk
@@ -851,6 +766,7 @@ private:
 //=============================================================================
 // Algorithm 5: Sample Sort
 //=============================================================================
+
 
 class SampleSort {
 public:
@@ -1113,8 +1029,8 @@ public:
         if (world_rank == 0) {
             cout << "[Master] Sample Sort complete!\n";
 
-            // Visualize results
-            IOHandler::visualizeData(result, "Sample Sort");
+            //// Visualize results
+            //IOHandler::visualizeData(result, "Sample Sort");
         }
 
         return result;
@@ -1135,12 +1051,6 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-    // Check if we have at least 2 processes
-    if (world_size < 2) {
-        cerr << "This program requires at least 2 processes" << endl;
-        MPI_Abort(MPI_COMM_WORLD, 1);
-        return 1;
-    }
 
     // Master process (rank 0) handles user interaction
     if (world_rank == 0) {
@@ -1158,20 +1068,6 @@ int main(int argc, char** argv) {
         int algorithm_choice;
         cin >> algorithm_choice;
 
-        // Ask for input file path
-        cout << "Enter the full path to the input file: ";
-        string filepath;
-        cin >> filepath;
-
-        // Read input data from file - BEFORE TIMING STARTS
-        vector<int> data = IOHandler::readInputFile(filepath);
-
-        if (data.empty()) {
-            cout << "Error: Input data is empty or file could not be read." << endl;
-            MPI_Abort(MPI_COMM_WORLD, 1);
-            MPI_Finalize();
-            return 1;
-        }
 
         // Broadcast algorithm choice to all processes
         MPI_Bcast(&algorithm_choice, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -1187,6 +1083,21 @@ int main(int argc, char** argv) {
             cout << " Quick Search Selected " << endl;
             cout << "-----------------------------" << endl;
 
+            // Ask for input file path
+            cout << "Enter the full path to the input file: ";
+            string filepath;
+            cin >> filepath;
+
+            // Read input data from file - BEFORE TIMING STARTS
+            vector<int> data = IOHandler::readInputFile(filepath);
+
+            if (data.empty()) {
+                cout << "Error: Input data is empty or file could not be read." << endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                MPI_Finalize();
+                return 1;
+            }
+
             int search_value;
             cout << endl << "Enter value to search: ";
             cin >> search_value;
@@ -1196,11 +1107,19 @@ int main(int argc, char** argv) {
 
             // Start timing only for algorithm execution
             timer.start();
-            int index = QuickSearch::parallelSearch(data, search_value, world_size);
+            vector<int> indeces = QuickSearch::parallelSearch(data, search_value, world_size);
             elapsed = timer.stop();
 
-            if (index == -1) {
+            if (indeces.empty()) {
                 cout << endl << "Result: Value " << search_value << " not found" << endl;
+            }
+            else
+            {
+				cout << endl << "Result: Value " << search_value << " found at indices: ";
+				for (int index : indeces) {
+					cout << index << " ";
+				}
+				cout << endl;
             }
        
         }
@@ -1210,20 +1129,37 @@ int main(int argc, char** argv) {
         case 2: // Prime Number Finding
         {
             cout << endl << "-----------------------------" << endl;
-            cout << " Prime Number Selected " << endl;
+            cout << " Prime Number in Range Selected " << endl;
             cout << "-----------------------------" << endl;
-            // Start timer just before algorithm execution
+            int start_range, end_range;
+            if (world_rank == 0) {
+                cout << "Enter start of range: ";
+                cin >> start_range;
+                cout << "Enter end of range: ";
+                cin >> end_range;
+                if (start_range > end_range) {
+                    swap(start_range, end_range);
+                }
+            }
+            MPI_Bcast(&start_range, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            MPI_Bcast(&end_range, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
             timer.start();
-            vector<int> primes = PrimeFinder::findPrimes(data, world_size);
+            ParallelPrimeFinder finder;
+            finder.setRange(start_range, end_range);
+            vector<int> primes = finder.run();
             elapsed = timer.stop();
 
-            cout << endl << "Found " << primes.size() << " prime numbers in the input data" << endl;
+            if (world_rank == 0) {
+                string output_path;
+                cout << endl << "Enter path to save results: ";
+                cin >> output_path;
+                IOHandler::writeOutputFile(output_path, primes);
 
-            // Save results to file - AFTER TIMING ENDS
-            string output_path;
-            cout << endl << "Enter path to save results: ";
-            cin >> output_path;
-            IOHandler::writeOutputFile(output_path, primes);
+                cout << "\nFound " << primes.size() << " prime numbers in range ["
+                    << start_range << ", " << end_range << "]" << endl;
+            }
+        
         }
         break;
 
@@ -1232,6 +1168,21 @@ int main(int argc, char** argv) {
             cout << endl << "-----------------------------" << endl;
             cout << " Bitonic Sort Selected " << endl;
             cout << "-----------------------------" << endl;
+
+            // Ask for input file path
+            cout << "Enter the full path to the input file: ";
+            string filepath;
+            cin >> filepath;
+
+            // Read input data from file - BEFORE TIMING STARTS
+            vector<int> data = IOHandler::readInputFile(filepath);
+
+            if (data.empty()) {
+                cout << "Error: Input data is empty or file could not be read." << endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                MPI_Finalize();
+                return 1;
+            }
 
             // Start timer just before algorithm execution
             timer.start();
@@ -1253,6 +1204,23 @@ int main(int argc, char** argv) {
             cout << endl << "-----------------------------" << endl;
             cout << " Radix Sort Selected " << endl;
             cout << "-----------------------------" << endl;
+
+
+            // Ask for input file path
+            cout << "Enter the full path to the input file: ";
+            string filepath;
+            cin >> filepath;
+
+            // Read input data from file - BEFORE TIMING STARTS
+            vector<int> data = IOHandler::readInputFile(filepath);
+
+            if (data.empty()) {
+                cout << "Error: Input data is empty or file could not be read." << endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                MPI_Finalize();
+                return 1;
+            }
+
             // Start timer just before algorithm execution
             timer.start();
             vector<int> sorted_data = RadixSort::parallelSort(data, world_size);
@@ -1273,6 +1241,22 @@ int main(int argc, char** argv) {
             cout << endl << "-----------------------------" << endl;
             cout << " Sample Sort Selected " << endl;
             cout << "-----------------------------" << endl;
+            
+            // Ask for input file path
+            cout << "Enter the full path to the input file: ";
+            string filepath;
+            cin >> filepath;
+
+            // Read input data from file - BEFORE TIMING STARTS
+            vector<int> data = IOHandler::readInputFile(filepath);
+
+            if (data.empty()) {
+                cout << "Error: Input data is empty or file could not be read." << endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+                MPI_Finalize();
+                return 1;
+            }
+            
             // Start timer just before algorithm execution
             timer.start();
             vector<int> sorted_data = SampleSort::parallelSort(data, world_size);
@@ -1315,7 +1299,12 @@ int main(int argc, char** argv) {
 
         case 2: // Prime Number Finding
         {
-            PrimeFinder::findPrimes(vector<int>(), world_size);
+            int start_range, end_range;
+            MPI_Bcast(&start_range, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            MPI_Bcast(&end_range, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            ParallelPrimeFinder finder;
+            finder.setRange(start_range, end_range);
+            finder.run();
         }
         break;
 
