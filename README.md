@@ -103,3 +103,35 @@ A parallel algorithm that finds all prime numbers within a specified range using
    ```bash
    git clone https://github.com/yourusername/parallel-algorithms.git
    cd parallel-algorithms
+2. Build the project using CMake:
+   ```bash
+   mkdir build
+   cd build
+   cmake ..
+   make
+   
+## 📊 Usage
+
+Each algorithm can be run in either **OpenMP mode** (for shared-memory parallelism) or **MPI mode** (for distributed computing).
+
+### OpenMP Mode
+
+1. Parallel Quick Search
+   ```bash
+   ./quick_search_omp <array_size> <num_threads> <search_value>
+2. Parallel Bitonic Sort
+   ```bash
+   ./bitonic_sort_omp <array_size> <num_threads>
+3. Parallel Sample Sort
+   ```bash
+   ./sample_sort_omp <array_size> <num_threads> <num_samples>
+4. Parallel Radix Sort
+   ```bash
+   ./radix_sort_omp <array_size> <num_threads> <bit_width>
+4. Parallel Prime Finder
+   ```bash
+   ./prime_finder_omp <lower_bound> <upper_bound> <num_threads>
+
+### 🛠️ MPI Mode
+
+   
